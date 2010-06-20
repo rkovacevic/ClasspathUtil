@@ -6,27 +6,21 @@ import java.lang.reflect.Modifier;
 import java.net.JarURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
-
 /**
  * Utility methods for searching classpath resources for <code>Class</code> objects.
- * Depends on Apache Commons Logging library.
  * 
  * @author Robert Kovacevic <robert.kovacevic1@gmail.com>
- * @version 1.0.0 - 24. 03. 2010.
+ * @version 1.0.1 - 25. 03. 2010.
  * 
  */
-public abstract class ClasspathUtil {
+public final class ClasspathUtil {
 
-	
 	private ClasspathUtil() {
 		// static class
 	}
@@ -40,7 +34,6 @@ public abstract class ClasspathUtil {
 	 * @return <code>Set</code> of <code>Class</code> objects that implement the interface
 	 * @throws IOException
 	 */
-	@SuppressWarnings("unchecked")
 	public static Set<Class<?>> getConcreteClassesWithInterface(String packageName, Class<?> interFace) throws IOException {
 		Set<Class<?>> classes = new HashSet<Class<?>>();
 
@@ -50,23 +43,46 @@ public abstract class ClasspathUtil {
 		
 		for (Class<?> c : getAllClasses(packageName)) {
 			if (!Modifier.isAbstract(c.getModifiers()) && !c.isInterface()) {
-				List<Class> interfaces = new ArrayList<Class>();
-				Class<?> superClass = c;
-				interfaces.addAll(Arrays.asList(superClass.getInterfaces()));
-				while (true) {
-					superClass = superClass.getSuperclass();
-					if (superClass == null) {
-						break;
-					}
-					interfaces.addAll(Arrays.asList(superClass.getInterfaces()));
-				}
-				if (interfaces.contains(interFace)) {
+				if (implementsInterface(c, interFace)) {
 					classes.add(c);
 				}
 			}
 		}
 
 		return classes;
+	}
+	
+	public static boolean implementsInterface(Class<?> klass, Class<?> interFace) {
+		if (interFace == null || !interFace.isInterface() || klass == null) {
+			return false;
+		}
+		
+		for (Class<?> i: klass.getInterfaces()) {
+			
+			if (isInterfaceEqual(i, interFace)) {
+				return true;
+			}
+		}
+		
+		Class<?> superClass = klass.getSuperclass();
+		if (superClass != null) {
+			return implementsInterface(superClass, interFace);
+		}
+		
+		return false;
+	}
+	
+	public static boolean isInterfaceEqual(Class<?> interface1, Class<?> interface2) {
+		if (interface1.equals(interface2)) {
+			return true;
+		}
+		
+		Class<?> superClass = interface1.getSuperclass();
+		if (superClass != null) {
+			return isInterfaceEqual(superClass, interface2);
+		}
+		
+		return false;
 	}
 
 	/**
@@ -81,7 +97,6 @@ public abstract class ClasspathUtil {
 	 * @throws IOException
 	 */
 	public static Set<Class<?>> getAllClasses(String packageName) throws IOException {
-
 		Set<Class<?>> classes = new HashSet<Class<?>>();
 
 		if (packageName == null || packageName.length() == 0) {
@@ -104,14 +119,23 @@ public abstract class ClasspathUtil {
 
 		JarURLConnection conn = (JarURLConnection) resource.openConnection();
 		JarFile jar = conn.getJarFile();
+
 		for (JarEntry entry : Collections.list(jar.entries())) {
-			if (entry.getName().startsWith(packageName.replace('.', '/')) && entry.getName().endsWith(".class") 
-					&& !entry.getName().contains("$")) {
-				String className = entry.getName().replace("/", ".").substring(0, entry.getName().length() - 6);
+			String n = entry.getName();
+			if (n.startsWith(packageName.replace('.', '/')) && n.endsWith(".class")) {
+				if (n.contains("$")) {
+					if (isAnonymous(n)) {
+						return classes;
+					}
+				}
+				String className = n.replace("/", ".").substring(0, n.length() - 6);
 				try {
-					classes.add(getClassForName(className));
+					Class<?> klass = getClassForName(className);
+					if (!Modifier.isPrivate(klass.getModifiers())) {
+						classes.add(klass);
+					}
 				} catch (ClassNotFoundException e) {
-					
+					//
 				}
 			}
 		}
@@ -129,16 +153,26 @@ public abstract class ClasspathUtil {
 				}
 			} else {
 				String fileName = file.getAbsolutePath();
-				if (fileName.endsWith(".class") && !fileName.contains("$")) {
+				if (fileName.endsWith(".class")) {
+					if (fileName.contains("$")) {
+						String innerName = fileName.substring(fileName.lastIndexOf("$") + 1, fileName.lastIndexOf("."));
+						if (isAnonymous(innerName)) {
+							// Ignore anonymous inner classes
+							return classes;
+						}
+					}
 					// removes the .class extension
 					fileName = fileName.substring(0, fileName.length() - 6);
 					fileName = fileName.replace(getSystemFileSeperator(), ".");
 					fileName = fileName.substring(fileName.indexOf(packageName));
 
 					try {
-						classes.add(getClassForName(fileName));
+						Class<?> klass = getClassForName(fileName);
+						if (!Modifier.isPrivate(klass.getModifiers())) {
+							classes.add(klass);
+						}
 					} catch (ClassNotFoundException e) {
-
+						//
 					}
 				}
 			}
@@ -168,8 +202,10 @@ public abstract class ClasspathUtil {
 			p = "/";
 		}
 		return p;
-		// klajsd
+	}
+	
+	private static boolean isAnonymous(String className) {
+		return className.matches("\\d*");
 	}
 
 }
-
